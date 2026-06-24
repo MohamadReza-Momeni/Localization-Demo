@@ -1,5 +1,6 @@
-from pyproj import Transformer
 import numpy as np
+from pyproj import Transformer
+
 
 class ENUConverter:
     def __init__(self, lat0, lon0):
@@ -8,7 +9,7 @@ class ENUConverter:
 
         self.transformer = Transformer.from_crs(
             "epsg:4326",
-            "epsg:32639",  # UTM zone 39N (Tehran)
+            "epsg:32639",  # Tehran zone
             always_xy=True
         )
 

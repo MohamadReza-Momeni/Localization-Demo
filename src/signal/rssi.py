@@ -1,7 +1,8 @@
 import numpy as np
 
+
 class RSSIModel:
-    def __init__(self, P0=-40, n=2.0, sigma=2.0, d0=1.0):
+    def __init__(self, P0=-40, n=2.2, sigma=2.0, d0=1.0):
         self.P0 = P0
         self.n = n
         self.sigma = sigma
