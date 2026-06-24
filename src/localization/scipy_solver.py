@@ -5,33 +5,23 @@ from .base_solver import BaseSolver
 
 class SciPyLocalizationSolver(BaseSolver):
 
-    def __init__(self):
-        pass
-
-    def _residuals(self, x, anchors, distances):
-        px, py = x
-        residuals = []
-
-        for i, a in enumerate(anchors):
-            ax, ay = a
-            d = np.sqrt((px - ax)**2 + (py - ay)**2)
-            residuals.append(d - distances[i])
-
-        return np.array(residuals)
-
-    def solve(self, anchors, distances, x0=None):
-
+    def solve(self, anchors, distances, x0=None, weights=None):
         anchors = np.asarray(anchors)
         distances = np.asarray(distances)
 
         if x0 is None:
             x0 = np.mean(anchors, axis=0)
 
+        if weights is None:
+            weights = np.ones(len(anchors))
+        else:
+            weights = np.asarray(weights)
+
         result = least_squares(
             self._residuals,
             x0,
-            args=(anchors, distances),
-            method="lm"   # Levenberg–Marquardt (great for NLS)
+            args=(anchors, distances, weights),
+            method="lm",
         )
 
         return {
@@ -39,5 +29,12 @@ class SciPyLocalizationSolver(BaseSolver):
             "cost": result.cost,
             "success": result.success,
             "message": result.message,
-            "iterations": result.nfev
+            "iterations": result.nfev,
         }
+
+    def _residuals(self, position, anchors, distances, weights):
+        estimated = np.linalg.norm(anchors - position, axis=1)
+        residuals = estimated - distances
+
+        # ✔ weighted residuals (IMPORTANT CHANGE)
+        return np.sqrt(weights) * residuals

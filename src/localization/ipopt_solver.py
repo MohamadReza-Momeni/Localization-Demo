@@ -1,77 +1,79 @@
-# import numpy as np
-# import ipopt
+import numpy as np
+
+from .base_solver import BaseSolver
 
 
-# class RSSILocalizationProblem:
-#     def __init__(self, anchors, distances):
-#         self.anchors = np.asarray(anchors)
-#         self.distances = np.asarray(distances)
-#         self.n = len(anchors)
+class RSSILocalizationProblem:
+    def __init__(self, anchors, distances):
+        self.anchors = np.asarray(anchors)
+        self.distances = np.asarray(distances)
 
-#     def objective(self, x):
-#         px, py = x
-#         err = 0.0
+    def objective(self, position):
+        residuals = self._residuals(position)
+        return np.sum(residuals**2)
 
-#         for i in range(self.n):
-#             ax, ay = self.anchors[i]
-#             d = np.sqrt((px - ax)**2 + (py - ay)**2)
-#             err += (d - self.distances[i])**2
+    def gradient(self, position):
+        px, py = position
+        gradient = np.zeros(2)
 
-#         return err
+        for anchor, distance in zip(self.anchors, self.distances):
+            dx = px - anchor[0]
+            dy = py - anchor[1]
+            estimated_distance = np.sqrt(dx**2 + dy**2) + 1e-9
+            residual = estimated_distance - distance
 
-#     def gradient(self, x):
-#         px, py = x
-#         gx, gy = 0.0, 0.0
+            gradient += 2 * residual * np.array([
+                dx / estimated_distance,
+                dy / estimated_distance,
+            ])
 
-#         for i in range(self.n):
-#             ax, ay = self.anchors[i]
+        return gradient
 
-#             dx = px - ax
-#             dy = py - ay
+    def constraints(self, position):
+        return np.array([])
 
-#             dist = np.sqrt(dx**2 + dy**2) + 1e-9
-#             diff = dist - self.distances[i]
+    def jacobian(self, position):
+        return np.array([])
 
-#             gx += 2 * diff * (dx / dist)
-#             gy += 2 * diff * (dy / dist)
+    def hessianstructure(self):
+        return np.array([])
 
-#         return np.array([gx, gy])
+    def hessian(self, position, lagrange, obj_factor):
+        return np.array([])
 
-#     def constraints(self, x):
-#         return np.array([])
-
-#     def jacobian(self, x):
-#         return np.array([])
-
-#     def hessianstructure(self):
-#         return np.array([])
-
-#     def hessian(self, x, lagrange, obj_factor):
-#         return np.array([])
+    def _residuals(self, position):
+        estimated_distances = np.linalg.norm(self.anchors - position, axis=1)
+        return estimated_distances - self.distances
 
 
-# class IPOPTSolver:
-#     def __init__(self, anchors, distances):
-#         self.problem = RSSILocalizationProblem(anchors, distances)
+class IPOPTSolver(BaseSolver):
+    def solve(self, anchors, distances, x0=None):
+        try:
+            import ipopt
+        except ImportError as exc:
+            raise RuntimeError("IPOPT is not installed in this environment.") from exc
 
-#     def solve(self, x0=None):
-#         if x0 is None:
-#             x0 = np.mean(self.problem.anchors, axis=0)
+        anchors = np.asarray(anchors)
+        distances = np.asarray(distances)
 
-#         nlp = ipopt.problem(
-#             n=2,
-#             m=0,
-#             problem_obj=self.problem,
-#             lb=[-1e6, -1e6],
-#             ub=[1e6, 1e6],
-#         )
+        if x0 is None:
+            x0 = np.mean(anchors, axis=0)
 
-#         nlp.addOption("print_level", 0)
-#         nlp.addOption("max_iter", 100)
+        problem = RSSILocalizationProblem(anchors, distances)
+        nlp = ipopt.problem(
+            n=2,
+            m=0,
+            problem_obj=problem,
+            lb=[-1e6, -1e6],
+            ub=[1e6, 1e6],
+        )
 
-#         x, info = nlp.solve(x0)
+        nlp.addOption("print_level", 0)
+        nlp.addOption("max_iter", 100)
 
-#         return {
-#             "solution": x,
-#             "info": info
-#         }
+        solution, info = nlp.solve(x0)
+
+        return {
+            "solution": solution,
+            "info": info,
+        }

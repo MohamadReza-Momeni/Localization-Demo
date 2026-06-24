@@ -1,26 +1,32 @@
 from src.experiments.runner import ExperimentRunner
 
 
-def main():
+ANCHOR_COUNT = 6
+TARGET_COUNT = 3
+RUN_COUNT = 500
+NOISE_STD = 2.0
+PATH_LOSS_EXPONENT = 2.2
 
+
+def main():
     runner = ExperimentRunner(
-        N=6,
-        T=3,
-        sigma=2.0,
-        n=2.2
+        anchor_count=ANCHOR_COUNT,
+        target_count=TARGET_COUNT,
+        noise_std=NOISE_STD,
+        path_loss_exponent=PATH_LOSS_EXPONENT,
     )
 
     print("Running batch experiments...")
 
-    df = runner.run_batch(L=50)  # 50 Monte Carlo runs
+    results = runner.run_batch(run_count=RUN_COUNT)
 
-    runner.save(df)
+    runner.save(results)
 
     print("\nDONE")
-    print(df.head())
+    print(results.head())
 
     print("\nSTATS:")
-    print(df["error"].describe())
+    print(results["error"].describe())
 
 
 if __name__ == "__main__":

@@ -1,80 +1,131 @@
+from dataclasses import dataclass
+
 import numpy as np
 import pandas as pd
 
+from src.evaluation.metrics import euclidean_error
+from src.localization.scipy_solver import SciPyLocalizationSolver
 from src.scenario.anchors import AnchorGenerator
 from src.scenario.targets import TargetGenerator
-from src.signal.rssi import RSSIModel
 from src.signal.distance import rssi_to_distance
-from src.localization.scipy_solver import SciPyLocalizationSolver
-from src.evaluation.metrics import euclidean_error
+from src.signal.rssi import RSSIModel
+
+
+@dataclass(frozen=True)
+class ExperimentConfig:
+    anchor_count: int = 6
+    target_count: int = 1
+    x_range: tuple[float, float] = (0, 1000)
+    y_range: tuple[float, float] = (0, 1000)
+
+    reference_power: float = -40
+    path_loss_exponent: float = 2.2
+    noise_std: float = 2.0
+
+    solvers: tuple[str, ...] = ("vanilla", "weighted")
 
 
 class ExperimentRunner:
+    def __init__(
+        self,
+        anchor_count=6,
+        target_count=1,
+        x_range=(0, 1000),
+        y_range=(0, 1000),
+        reference_power=-40,
+        path_loss_exponent=2.2,
+        noise_std=2.0,
+    ):
+        self.config = ExperimentConfig(
+            anchor_count=anchor_count,
+            target_count=target_count,
+            x_range=x_range,
+            y_range=y_range,
+            reference_power=reference_power,
+            path_loss_exponent=path_loss_exponent,
+            noise_std=noise_std,
+        )
 
-    def __init__(self,
-                 N=6,
-                 T=1,
-                 x_range=(0, 1000),
-                 y_range=(0, 1000),
-                 P0=-40,
-                 n=2.2,
-                 sigma=2.0):
-
-        self.N = N
-        self.T = T
-        self.x_range = x_range
-        self.y_range = y_range
-
-        self.model = RSSIModel(P0=P0, n=n, sigma=sigma)
+        self.model = RSSIModel(
+            reference_power=reference_power,
+            path_loss_exponent=path_loss_exponent,
+            noise_std=noise_std,
+        )
         self.solver = SciPyLocalizationSolver()
 
     def run_single(self, run_id=0):
+        anchors, targets = self._generate_scenario(run_id)
+        rssi_matrix = self.model.rssi_matrix(anchors, targets)
 
-        anchors = AnchorGenerator(self.N, self.x_range, self.y_range).generate()
-        targets = TargetGenerator(self.T, self.x_range, self.y_range).generate()
+        return [
+            self._localize_target(
+                run_id,
+                target_id,
+                target,
+                anchors,
+                rssi_matrix[:, target_id],
+            )
+            for target_id, target in enumerate(targets)
+        ]
 
-        rssi = self.model.rssi_matrix(anchors, targets)
+    def run_batch(self, run_count=100):
+        rows = []
 
-        results = []
+        for run_id in range(run_count):
+            rows.extend(self.run_single(run_id=run_id))
 
-        for t in range(self.T):
+        return pd.DataFrame(rows)
 
-            true = targets[t]
+    def save(self, results, path="results.csv"):
+        try:
+            results.to_csv(path, index=False)
+        except PermissionError as exc:
+            raise PermissionError(
+                f"Could not write '{path}'. Close the file if it is open and try again."
+            ) from exc
 
-            rssi_vals = rssi[:, t]
+    def _generate_scenario(self, run_id):
+        anchor_seed = 42 + run_id
+        target_seed = 1 + run_id
 
-            distances = np.array([
-                rssi_to_distance(rssi_vals[i], self.model.P0, self.model.n)
-                for i in range(self.N)
-            ])
+        anchors = AnchorGenerator(
+            self.config.anchor_count,
+            self.config.x_range,
+            self.config.y_range,
+            seed=anchor_seed,
+        ).generate()
+        targets = TargetGenerator(
+            self.config.target_count,
+            self.config.x_range,
+            self.config.y_range,
+            seed=target_seed,
+        ).generate()
 
-            sol = self.solver.solve(anchors, distances)
+        return anchors, targets
 
-            est = sol["solution"]
-            err = euclidean_error(true, est)
+    def _localize_target(self, run_id, target_id, true_position, anchors, rssi_values):
+        distances = self._estimate_distances(rssi_values)
+        solution = self.solver.solve(anchors, distances)
+        estimated_position = solution["solution"]
 
-            results.append({
-                "run_id": run_id,
-                "target_id": t,
-                "anchor_count": self.N,
-                "true_x": true[0],
-                "true_y": true[1],
-                "est_x": est[0],
-                "est_y": est[1],
-                "error": err,
-                "success": sol["success"]
-            })
+        return {
+            "run_id": run_id,
+            "target_id": target_id,
+            "anchor_count": self.config.anchor_count,
+            "true_x": true_position[0],
+            "true_y": true_position[1],
+            "est_x": estimated_position[0],
+            "est_y": estimated_position[1],
+            "error": euclidean_error(true_position, estimated_position),
+            "success": solution["success"],
+        }
 
-        return results
-
-    def run_batch(self, L=100):
-
-        all_results = []
-
-        for i in range(L):
-            all_results.extend(self.run_single(run_id=i))
-
-        return pd.DataFrame(all_results)
-
-    def save(self, df, path="results.csv"):
-        df.to_csv(path, index=False)
+    def _estimate_distances(self, rssi_values):
+        return np.array([
+            rssi_to_distance(
+                rssi,
+                self.model.reference_power,
+                self.model.path_loss_exponent,
+            )
+            for rssi in rssi_values
+        ])
