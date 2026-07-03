@@ -57,16 +57,20 @@ class ExperimentRunner:
         anchors, targets = self._generate_scenario(run_id)
         rssi_matrix = self.model.rssi_matrix(anchors, targets)
 
-        return [
-            self._localize_target(
-                run_id,
-                target_id,
-                target,
-                anchors,
-                rssi_matrix[:, target_id],
+        rows = []
+
+        for target_id, target in enumerate(targets):
+            rows.extend(
+                self._localize_target(
+                    run_id,
+                    target_id,
+                    target,
+                    anchors,
+                    rssi_matrix[:, target_id],
+                )
             )
-            for target_id, target in enumerate(targets)
-        ]
+
+        return rows
 
     def run_batch(self, run_count=100):
         rows = []
@@ -103,22 +107,50 @@ class ExperimentRunner:
 
         return anchors, targets
 
-    def _localize_target(self, run_id, target_id, true_position, anchors, rssi_values):
+    def _localize_target(
+        self,
+        run_id,
+        target_id,
+        true_position,
+        anchors,
+        rssi_values,
+    ):
         distances = self._estimate_distances(rssi_values)
-        solution = self.solver.solve(anchors, distances)
-        estimated_position = solution["solution"]
 
-        return {
-            "run_id": run_id,
-            "target_id": target_id,
-            "anchor_count": self.config.anchor_count,
-            "true_x": true_position[0],
-            "true_y": true_position[1],
-            "est_x": estimated_position[0],
-            "est_y": estimated_position[1],
-            "error": euclidean_error(true_position, estimated_position),
-            "success": solution["success"],
-        }
+        rows = []
+
+        for solver_name in self.config.solvers:
+
+            if solver_name == "vanilla":
+                solution = self.solver.solve(anchors, distances)
+
+            elif solver_name == "weighted":
+                weights = self._compute_weights(anchors)
+                solution = self.solver.solve(
+                    anchors,
+                    distances,
+                    weights=weights,
+                )
+
+            else:
+                raise ValueError(f"Unknown solver: {solver_name}")
+
+            est = solution["solution"]
+
+            rows.append({
+                "run_id": run_id,
+                "target_id": target_id,
+                "solver": solver_name,
+                "anchor_count": self.config.anchor_count,
+                "true_x": true_position[0],
+                "true_y": true_position[1],
+                "est_x": est[0],
+                "est_y": est[1],
+                "error": euclidean_error(true_position, est),
+                "success": solution["success"],
+            })
+
+        return rows
 
     def _estimate_distances(self, rssi_values):
         return np.array([
@@ -129,3 +161,6 @@ class ExperimentRunner:
             )
             for rssi in rssi_values
         ])
+    def _compute_weights(self, anchors):
+        d = np.linalg.norm(anchors - np.mean(anchors, axis=0), axis=1)
+        return 1.0 / (d**2 + 1e-6)

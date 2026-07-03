@@ -36,5 +36,7 @@ class SciPyLocalizationSolver(BaseSolver):
         estimated = np.linalg.norm(anchors - position, axis=1)
         residuals = estimated - distances
 
-        # ✔ weighted residuals (IMPORTANT CHANGE)
+        if weights is None:
+            return residuals
+
         return np.sqrt(weights) * residuals
