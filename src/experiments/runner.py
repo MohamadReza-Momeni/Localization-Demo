@@ -1,5 +1,4 @@
 from dataclasses import dataclass
-
 import numpy as np
 import pandas as pd
 
@@ -9,6 +8,7 @@ from src.scenario.anchors import AnchorGenerator
 from src.scenario.targets import TargetGenerator
 from src.signal.distance import rssi_to_distance
 from src.signal.rssi import RSSIModel
+from src.localization.ipopt_solver import IPOPTSolver
 
 
 @dataclass(frozen=True)
@@ -22,7 +22,7 @@ class ExperimentConfig:
     path_loss_exponent: float = 2.2
     noise_std: float = 2.0
 
-    solvers: tuple[str, ...] = ("vanilla", "weighted")
+    solvers: tuple[str, ...] = ("vanilla", "weighted", "ipopt")
 
 
 class ExperimentRunner:
@@ -51,7 +51,8 @@ class ExperimentRunner:
             path_loss_exponent=path_loss_exponent,
             noise_std=noise_std,
         )
-        self.solver = SciPyLocalizationSolver()
+        self.scipy_solver = SciPyLocalizationSolver()
+        self.ipopt_solver = IPOPTSolver()
 
     def run_single(self, run_id=0):
         anchors, targets = self._generate_scenario(run_id)
@@ -122,17 +123,36 @@ class ExperimentRunner:
         for solver_name in self.config.solvers:
 
             if solver_name == "vanilla":
-                solution = self.solver.solve(anchors, distances)
+                solution = self.scipy_solver.solve(anchors, distances)
+                est = solution["solution"]
+                success = solution["success"]
 
             elif solver_name == "weighted":
                 weights = self._compute_weights(anchors)
-                solution = self.solver.solve(
+                solution = self.scipy_solver.solve(
+                    anchors, distances, weights=weights
+                )
+                est = solution["solution"]
+                success = solution["success"]
+
+
+
+
+            elif solver_name == "ipopt":
+                solution = self.ipopt_solver.solve(
                     anchors,
                     distances,
-                    weights=weights,
+                    ref_power=self.model.reference_power,
+                    ple=self.model.path_loss_exponent
+
                 )
+                est = solution["solution"]
+                status_code = solution["info"].get("status", -1)
+                success = status_code in [0, 1]
+
 
             else:
+
                 raise ValueError(f"Unknown solver: {solver_name}")
 
             est = solution["solution"]
@@ -147,7 +167,7 @@ class ExperimentRunner:
                 "est_x": est[0],
                 "est_y": est[1],
                 "error": euclidean_error(true_position, est),
-                "success": solution["success"],
+                "success": success,
             })
 
         return rows
@@ -161,6 +181,7 @@ class ExperimentRunner:
             )
             for rssi in rssi_values
         ])
+
     def _compute_weights(self, anchors):
         d = np.linalg.norm(anchors - np.mean(anchors, axis=0), axis=1)
         return 1.0 / (d**2 + 1e-6)

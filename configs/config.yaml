@@ -1,3 +1,4 @@
 project: Localization Demo
 version: 0.1
 parameters: {}
+solver: 
