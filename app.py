@@ -4,7 +4,7 @@ from src.experiments.runner import ExperimentRunner
 from src.visualization.map_generator import LocalizationVisualizer
 
 st.set_page_config(page_title="Localization Simulator", layout="wide")
-st.title("📡 Localization Algorithm Simulator")
+st.title("Localization Algorithm Simulator")
 
 # --- 1. SIDEBAR INPUTS ---
 st.sidebar.header("Simulation Parameters")
@@ -67,7 +67,7 @@ if st.sidebar.button("Run Simulation", type="primary"):
 
     # --- 4. DISPLAY MAP ---
     st.markdown("---")
-    st.subheader("Geospatial Map Visualization (Run 0)")
+    st.subheader("Geospatial Map Visualization")
     
     visualizer = LocalizationVisualizer(lat0=lat0, lon0=lon0)
     map_filename = "web_localization_map.html"
