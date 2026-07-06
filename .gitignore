@@ -6,6 +6,7 @@ __pycache__/
 *.pyo
 *.pyd
 *.html
+*.csv
 
 .pytest_cache/
 .mypy_cache/
