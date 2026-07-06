@@ -14,12 +14,19 @@ runs = st.sidebar.number_input("Number of Runs", min_value=1, max_value=1000, va
 
 st.sidebar.markdown("---")
 st.sidebar.subheader("Randomized Signal Environment")
-st.sidebar.write("Set the min/max ranges for each run:")
-
-# UPDATED: Using range sliders (passing a tuple to 'value' creates a dual-handle slider)
 p0_range = st.sidebar.slider("P0 Range (dBm)", min_value=-50.0, max_value=50.0, value=(-50.0, 50.0), step=1.0)
 ple_range = st.sidebar.slider("Path Loss Exponent (n) Range", min_value=2.0, max_value=8.0, value=(2.0, 8.0), step=0.1)
 noise_range = st.sidebar.slider("Noise Std Dev (sigma) Range", min_value=0.0, max_value=10.0, value=(0.0, 10.0), step=0.1)
+
+st.sidebar.markdown("---")
+st.sidebar.subheader("Algorithms")
+# ADDED: Multi-select box for solvers
+available_solvers = ["vanilla", "weighted", "ipopt", "weighted_ipopt"]
+selected_solvers = st.sidebar.multiselect(
+    "Select solvers to evaluate:",
+    options=available_solvers,
+    default=available_solvers # By default, all are selected
+)
 
 lat0 = 35.7152
 lon0 = 51.4043
@@ -27,15 +34,20 @@ lon0 = 51.4043
 # --- 2. EXECUTION ---
 if st.sidebar.button("Run Simulation", type="primary"):
     
-    with st.spinner("Running batch experiments with randomized variables..."):
+    # ADDED: Prevent running if no solvers are selected
+    if not selected_solvers:
+        st.sidebar.error("❌ Please select at least one solver to run.")
+        st.stop()
+    
+    with st.spinner(f"Running {runs} batch experiments across {len(selected_solvers)} solvers..."):
         
-        # UPDATED: Passing the new range arguments to match runner.py
         runner = ExperimentRunner(
             anchor_count=anchors,
             target_count=targets,
             p0_range=p0_range,
             ple_range=ple_range,
-            noise_range=noise_range
+            noise_range=noise_range,
+            solvers=selected_solvers # ADDED: Pass the selected list
         )
         
         results = runner.run_batch(run_count=runs)
@@ -48,7 +60,6 @@ if st.sidebar.button("Run Simulation", type="primary"):
     
     with col1:
         st.subheader("Data Preview")
-        # You will now see p0, ple, and sigma columns changing in this table!
         st.dataframe(results.head(10), use_container_width=True)
         
         csv_data = results.to_csv(index=False).encode('utf-8')
@@ -67,7 +78,7 @@ if st.sidebar.button("Run Simulation", type="primary"):
 
     # --- 4. DISPLAY MAP ---
     st.markdown("---")
-    st.subheader("Geospatial Map Visualization")
+    st.subheader("Geospatial Map Visualization (Run 0)")
     
     visualizer = LocalizationVisualizer(lat0=lat0, lon0=lon0)
     map_filename = "web_localization_map.html"
