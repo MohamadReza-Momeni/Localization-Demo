@@ -4,3 +4,4 @@ scipy
 folium
 streamlit
 cyipopt-wheels
+plotly

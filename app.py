@@ -1,7 +1,7 @@
 import streamlit as st
 import streamlit.components.v1 as components
+import plotly.express as px
 
-# --- NEW CLEAN ARCHITECTURE IMPORTS ---
 from src.experiments.config import ExperimentConfig
 from src.experiments.task import SimulationTask
 from src.experiments.executor import BatchExecutor
@@ -45,7 +45,6 @@ if st.sidebar.button("Run Simulation", type="primary"):
     
     with st.spinner(f"Running {runs} batch experiments across {len(selected_solvers)} solvers..."):
         
-        # 1. Define the Configuration
         config = ExperimentConfig(
             anchor_count=anchors,
             target_count=targets,
@@ -57,17 +56,25 @@ if st.sidebar.button("Run Simulation", type="primary"):
             solvers=tuple(selected_solvers) 
         )
         
-        # 2. Assemble the Pipeline using our new Clean Architecture
         task = SimulationTask(config)
         executor = BatchExecutor(task)
         
-        # 3. Execute and Save
         results = executor.run(run_count=runs)
         ResultExporter.save_csv(results) 
         
+        st.session_state["results"] = results
+        st.session_state["total_runs"] = runs
+        
     st.success("Simulation Complete!")
-    
-    # --- 3. DISPLAY RESULTS & DOWNLOAD ---
+
+
+# --- DISPLAY SECTION ---
+if "results" in st.session_state:
+    results = st.session_state["results"]
+    total_runs = st.session_state["total_runs"]
+
+    # --- 4. DATA PREVIEW & STATISTICS ---
+    st.markdown("---")
     col1, col2 = st.columns(2)
     with col1:
         st.subheader("Data Preview")
@@ -83,18 +90,65 @@ if st.sidebar.button("Run Simulation", type="primary"):
         stats = results.groupby("solver")["error"].describe()
         st.dataframe(stats, use_container_width=True)
 
-    # --- 4. DISPLAY MAP ---
+    # --- 3. DYNAMIC MAP VISUALIZATION (MOVED TO TOP) ---
     st.markdown("---")
-    st.subheader("Geospatial Map Visualization (Run 0)")
+    st.subheader("Geospatial Map Visualization")
+    
+    selected_run = st.slider(
+        "Select Run ID to Visualize", 
+        min_value=0, 
+        max_value=total_runs - 1, 
+        value=0,
+        help="Slide to see how the anchors and targets randomized for different runs!"
+    )
     
     visualizer = LocalizationVisualizer(
         lat0=lat0, lon0=lon0, x_range=(0, map_width), y_range=(0, map_height)
     )
-    map_filename = "web_localization_map.html"
-    visualizer.generate_run_map(run_id=0, output_filename=map_filename)
+    
+    map_filename = f"web_localization_map_run_{selected_run}.html"
+    visualizer.generate_run_map(run_id=selected_run, output_filename=map_filename)
     
     with open(map_filename, "r") as f:
         html_data = f.read()
         components.html(html_data, height=600)
+
+    # --- 5. ADVANCED PLOTS ---
+    st.markdown("---")
+    st.subheader("Solver Performance Analysis")
+    
+    # NEW: Spatial Error Heatmap
+    # We use facet_col to break it out into a grid, one mini-map per solver
+    fig_heatmap = px.density_heatmap(
+        results, 
+        x="true_x", 
+        y="true_y", 
+        z="error",           # The color intensity is based on the error
+        histfunc="avg",      # Average the error if multiple runs land in the same grid square
+        facet_col="solver",  # Create a separate heatmap for each algorithm
+        facet_col_wrap=3,    # Wrap to a new row after 3 plots
+        title="Spatial Error Heatmap (Red = Higher Average Error)",
+        labels={"true_x": "Map X (m)", "true_y": "Map Y (m)", "error": "Avg Error (m)"},
+        color_continuous_scale="Reds", 
+        range_x=[0, map_width],
+        range_y=[0, map_height],
+        nbinsx=15,           # Divides the map into a 15x15 grid
+        nbinsy=15
+    )
+    fig_heatmap.update_layout(height=500)
+    st.plotly_chart(fig_heatmap, use_container_width=True)
+
+    # MOVED: Box Plot
+    fig_box = px.box(
+        results, 
+        x="solver", 
+        y="error", 
+        color="solver",
+        title="Distribution of Localization Errors by Algorithm",
+        labels={"error": "Error Distance (meters)", "solver": "Algorithm"},
+        points="outliers" 
+    )
+    st.plotly_chart(fig_box, use_container_width=True)
+
 else:
     st.info("Adjust parameters in the sidebar and click 'Run Simulation' to start.")
