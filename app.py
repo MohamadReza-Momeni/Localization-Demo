@@ -1,6 +1,11 @@
 import streamlit as st
 import streamlit.components.v1 as components
-from src.experiments.runner import ExperimentRunner
+
+# --- NEW CLEAN ARCHITECTURE IMPORTS ---
+from src.experiments.config import ExperimentConfig
+from src.experiments.task import SimulationTask
+from src.experiments.executor import BatchExecutor
+from src.experiments.exporter import ResultExporter
 from src.visualization.map_generator import LocalizationVisualizer
 
 st.set_page_config(page_title="Localization Simulator", layout="wide")
@@ -14,7 +19,6 @@ runs = st.sidebar.number_input("Number of Runs", min_value=1, max_value=1000, va
 
 st.sidebar.markdown("---")
 st.sidebar.subheader("Map Dimensions & Location")
-# ADDED: Dynamic Map Width, Height, and Origin Coordinates
 map_width = st.sidebar.number_input("Map Width (X meters)", min_value=100, max_value=10000, value=1000)
 map_height = st.sidebar.number_input("Map Height (Y meters)", min_value=100, max_value=10000, value=1000)
 lat0 = st.sidebar.number_input("Origin Latitude", value=35.7152, format="%.6f")
@@ -40,22 +44,30 @@ if st.sidebar.button("Run Simulation", type="primary"):
         st.stop()
     
     with st.spinner(f"Running {runs} batch experiments across {len(selected_solvers)} solvers..."):
-        runner = ExperimentRunner(
+        
+        # 1. Define the Configuration
+        config = ExperimentConfig(
             anchor_count=anchors,
             target_count=targets,
-            x_range=(0, map_width),   # PASSED HERE
-            y_range=(0, map_height),  # PASSED HERE
+            x_range=(0, map_width),   
+            y_range=(0, map_height),  
             p0_range=p0_range,
             ple_range=ple_range,
             noise_range=noise_range,
-            solvers=selected_solvers 
+            solvers=tuple(selected_solvers) 
         )
         
-        results = runner.run_batch(run_count=runs)
-        runner.save(results) 
+        # 2. Assemble the Pipeline using our new Clean Architecture
+        task = SimulationTask(config)
+        executor = BatchExecutor(task)
+        
+        # 3. Execute and Save
+        results = executor.run(run_count=runs)
+        ResultExporter.save_csv(results) 
         
     st.success("Simulation Complete!")
     
+    # --- 3. DISPLAY RESULTS & DOWNLOAD ---
     col1, col2 = st.columns(2)
     with col1:
         st.subheader("Data Preview")
@@ -71,10 +83,10 @@ if st.sidebar.button("Run Simulation", type="primary"):
         stats = results.groupby("solver")["error"].describe()
         st.dataframe(stats, use_container_width=True)
 
+    # --- 4. DISPLAY MAP ---
     st.markdown("---")
     st.subheader("Geospatial Map Visualization (Run 0)")
     
-    # ADDED: Passing custom lat/lon and bounds to the Visualizer
     visualizer = LocalizationVisualizer(
         lat0=lat0, lon0=lon0, x_range=(0, map_width), y_range=(0, map_height)
     )

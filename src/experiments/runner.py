@@ -115,7 +115,7 @@ class ExperimentRunner:
                     weights = self._compute_weights(anchors) 
                     solution = self.ipopt_solver.solve(
                         anchors, distances, ref_power=p0, ple=ple, weights=weights, x0=baseline_guess,
-                        x_range=self.config.x_range, y_range=self.config.y_range # ADDED
+                        x_range=self.config.x_range, y_range=self.config.y_range
                     )
                     status_code = solution["info"].get("status", -1)
                     success = status_code in [0, 1]
