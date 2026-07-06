@@ -66,13 +66,11 @@ class RSSIDomainProblem:
 class IPOPTSolver(BaseSolver):
 
     # 5. Add weights parameter to the solve method
-    def solve(self, anchors, distances, x0=None, ref_power=-40, ple=2.2, weights=None):
+    def solve(self, anchors, distances, x0=None, ref_power=-40, ple=2.2, weights=None, x_range=(0,1000), y_range=(0,1000)):
         try:
             import cyipopt
         except ImportError as exc:
-            raise RuntimeError(
-                "cyipopt is not installed in this environment."
-            ) from exc
+            raise RuntimeError("cyipopt is not installed in this environment.") from exc
 
         anchors = np.asarray(anchors)
         distances = np.asarray(distances)
@@ -80,21 +78,17 @@ class IPOPTSolver(BaseSolver):
         if x0 is None:
             x0 = np.mean(anchors, axis=0)
 
-        # Pass weights down into the problem formulation
         problem = RSSIDomainProblem(
-            anchors, 
-            distances, 
-            ref_power=ref_power, 
-            ple=ple, 
-            weights=weights
+            anchors, distances, ref_power=ref_power, ple=ple, weights=weights
         )
 
         nlp = cyipopt.Problem(
             n=2,
             m=0,
             problem_obj=problem,
-            lb=np.array([0.0, 0.0]), 
-            ub=np.array([1000.0, 1000.0]), 
+            # UPDATED: Use dynamic bounds for Lower Bound (lb) and Upper Bound (ub)
+            lb=np.array([x_range[0], y_range[0]]), 
+            ub=np.array([x_range[1], y_range[1]]), 
             cl=np.array([]),
             cu=np.array([])
         )

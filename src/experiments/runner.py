@@ -52,7 +52,11 @@ class ExperimentRunner:
         
         self.scipy_solver = SciPyLocalizationSolver()
         self.ipopt_solver = IPOPTSolver()
-        self.pf_solver = ParticleFilterSolver() 
+        # Pass the custom bounds to the Particle Filter!
+        self.pf_solver = ParticleFilterSolver(
+            x_bounds=self.config.x_range, 
+            y_bounds=self.config.y_range
+        )
 
     def _run_single_experiment(self, run_id):
         rows = []
@@ -101,11 +105,8 @@ class ExperimentRunner:
                     
                 elif solver_name == "ipopt":
                     solution = self.ipopt_solver.solve(
-                        anchors, 
-                        distances, 
-                        ref_power=p0, 
-                        ple=ple,
-                        x0=baseline_guess # Pass the baseline guess here
+                        anchors, distances, ref_power=p0, ple=ple, x0=baseline_guess,
+                        x_range=self.config.x_range, y_range=self.config.y_range # ADDED
                     )
                     status_code = solution["info"].get("status", -1)
                     success = status_code in [0, 1]
@@ -113,12 +114,8 @@ class ExperimentRunner:
                 elif solver_name == "weighted_ipopt":
                     weights = self._compute_weights(anchors) 
                     solution = self.ipopt_solver.solve(
-                        anchors, 
-                        distances, 
-                        ref_power=p0, 
-                        ple=ple, 
-                        weights=weights,
-                        x0=baseline_guess # Pass the baseline guess here
+                        anchors, distances, ref_power=p0, ple=ple, weights=weights, x0=baseline_guess,
+                        x_range=self.config.x_range, y_range=self.config.y_range # ADDED
                     )
                     status_code = solution["info"].get("status", -1)
                     success = status_code in [0, 1]
@@ -131,7 +128,7 @@ class ExperimentRunner:
                         x0=baseline_guess
                     )
                     success = solution["success"]
-                    
+
                 else:
                     raise ValueError(f"Unknown solver: {solver_name}")
 

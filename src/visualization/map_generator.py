@@ -7,15 +7,15 @@ from src.scenario.anchors import AnchorGenerator
 
 
 class LocalizationVisualizer:
-
-    def __init__(self, lat0, lon0, results_path="results.csv"):
+    # ADDED: x_range and y_range parameters
+    def __init__(self, lat0, lon0, x_range=(0, 1000), y_range=(0, 1000), results_path="results.csv"):
         self.converter = ENUConverter(lat0, lon0)
         self.results_path = results_path
+        self.x_range = x_range
+        self.y_range = y_range
 
         if not os.path.exists(results_path):
-            raise FileNotFoundError(
-                f"No results file found at {results_path}. Run experiments first!"
-            )
+            raise FileNotFoundError(f"No results file found at {results_path}. Run experiments first!")
         self.df = pd.read_csv(results_path)
 
     def generate_run_map(self, run_id=0, output_filename=None):
@@ -29,8 +29,9 @@ class LocalizationVisualizer:
         anchor_count = run_data["anchor_count"].iloc[0]
 
         anchor_seed = 42 + run_id
+        # UPDATED: Use dynamic bounds instead of (0, 1000)
         anchors_enu = AnchorGenerator(
-            anchor_count, (0, 1000), (0, 1000), seed=anchor_seed
+            anchor_count, self.x_range, self.y_range, seed=anchor_seed
         ).generate()
 
         m = folium.Map(
