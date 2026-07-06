@@ -10,6 +10,7 @@ from src.scenario.targets import TargetGenerator
 from src.signal.distance import rssi_to_distance
 from src.signal.rssi import RSSIModel
 from src.localization.ipopt_solver import IPOPTSolver
+from src.localization.particle_filter_solver import ParticleFilterSolver
 
 
 @dataclass(frozen=True)
@@ -23,8 +24,7 @@ class ExperimentConfig:
     ple_range: tuple[float, float] = (2.0, 8.0)
     noise_range: tuple[float, float] = (0.0, 10.0)
 
-    # This is now just the default fallback
-    solvers: tuple[str, ...] = ("vanilla", "weighted", "ipopt", "weighted_ipopt")
+    solvers: tuple[str, ...] = ("vanilla", "weighted", "ipopt", "weighted_ipopt", "particle_filter")
 
 
 class ExperimentRunner:
@@ -37,7 +37,7 @@ class ExperimentRunner:
         p0_range=(-50.0, 50.0),
         ple_range=(2.0, 8.0),
         noise_range=(0.0, 10.0),
-        solvers=("vanilla", "weighted", "ipopt", "weighted_ipopt") # ADDED: Accept solvers here
+        solvers=("vanilla", "weighted", "ipopt", "weighted_ipopt")
     ):
         self.config = ExperimentConfig(
             anchor_count=anchor_count,
@@ -47,13 +47,13 @@ class ExperimentRunner:
             p0_range=p0_range,
             ple_range=ple_range,
             noise_range=noise_range,
-            solvers=tuple(solvers) # ADDED: Pass to config
+            solvers=tuple(solvers)
         )
         
         self.scipy_solver = SciPyLocalizationSolver()
         self.ipopt_solver = IPOPTSolver()
+        self.pf_solver = ParticleFilterSolver() 
 
-    
     def _run_single_experiment(self, run_id):
         rows = []
         
@@ -82,27 +82,56 @@ class ExperimentRunner:
                 for rssi in rssi_values
             ])
 
+            # --- WARM START PIPELINE ---
+            # 1. Always run the robust vanilla SciPy solver first
+            vanilla_solution = self.scipy_solver.solve(anchors, distances)
+            baseline_guess = vanilla_solution["solution"]
+            vanilla_success = vanilla_solution["success"]
+
             for solver_name in self.config.solvers:
                 if solver_name == "vanilla":
-                    solution = self.scipy_solver.solve(anchors, distances)
-                    success = solution["success"]
+                    # Reuse the solution we already calculated to save time!
+                    solution = vanilla_solution
+                    success = vanilla_success
+                    
                 elif solver_name == "weighted":
                     weights = self._compute_weights(anchors)
                     solution = self.scipy_solver.solve(anchors, distances, weights=weights)
                     success = solution["success"]
+                    
                 elif solver_name == "ipopt":
                     solution = self.ipopt_solver.solve(
-                        anchors, distances, ref_power=p0, ple=ple       
+                        anchors, 
+                        distances, 
+                        ref_power=p0, 
+                        ple=ple,
+                        x0=baseline_guess # Pass the baseline guess here
                     )
                     status_code = solution["info"].get("status", -1)
                     success = status_code in [0, 1]
+                    
                 elif solver_name == "weighted_ipopt":
                     weights = self._compute_weights(anchors) 
                     solution = self.ipopt_solver.solve(
-                        anchors, distances, ref_power=p0, ple=ple, weights=weights
+                        anchors, 
+                        distances, 
+                        ref_power=p0, 
+                        ple=ple, 
+                        weights=weights,
+                        x0=baseline_guess # Pass the baseline guess here
                     )
                     status_code = solution["info"].get("status", -1)
                     success = status_code in [0, 1]
+                
+                elif solver_name == "particle_filter":
+                    # We pass the baseline_guess (vanilla) for the warm start!
+                    solution = self.pf_solver.solve(
+                        anchors, 
+                        distances, 
+                        x0=baseline_guess
+                    )
+                    success = solution["success"]
+                    
                 else:
                     raise ValueError(f"Unknown solver: {solver_name}")
 
@@ -126,21 +155,12 @@ class ExperimentRunner:
 
         return rows
 
-    # --- UPDATED METHOD: Uses ProcessPoolExecutor to distribute work ---
     def run_batch(self, run_count, max_workers=None):
         all_rows = []
-        
-        # This spins up multiple Python processes. 
-        # If max_workers=None, it uses all available cores on your CPU.
         with concurrent.futures.ProcessPoolExecutor(max_workers=max_workers) as executor:
-            
-            # .map() automatically sends run_ids (0, 1, 2...) to different CPU cores
             results_generator = executor.map(self._run_single_experiment, range(run_count))
-            
-            # As each core finishes a run, we extend the main list
             for run_rows in results_generator:
                 all_rows.extend(run_rows)
-
         return pd.DataFrame(all_rows)
 
     def _compute_weights(self, anchors):

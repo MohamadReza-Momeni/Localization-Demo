@@ -21,7 +21,7 @@ noise_range = st.sidebar.slider("Noise Std Dev (sigma) Range", min_value=0.0, ma
 st.sidebar.markdown("---")
 st.sidebar.subheader("Algorithms")
 # ADDED: Multi-select box for solvers
-available_solvers = ["vanilla", "weighted", "ipopt", "weighted_ipopt"]
+available_solvers = ["vanilla", "weighted", "ipopt", "weighted_ipopt", "particle_filter"]
 selected_solvers = st.sidebar.multiselect(
     "Select solvers to evaluate:",
     options=available_solvers,
