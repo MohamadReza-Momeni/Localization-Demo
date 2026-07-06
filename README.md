@@ -1,8 +1,3 @@
-Here is a comprehensive, professional `README.md` for your project. It reflects the new Clean Code architecture, the parallel processing capabilities, the Streamlit dashboard, and the full suite of localization algorithms we implemented.
-
-You can copy and paste this directly into a `README.md` file in the root of your project.
-
----
 
 # RF Localization Simulator
 
