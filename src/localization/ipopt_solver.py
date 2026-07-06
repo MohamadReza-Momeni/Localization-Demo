@@ -94,7 +94,7 @@ class IPOPTSolver(BaseSolver):
         )
 
         # nlp.add_option("print_level", 0)
-        nlp.add_option("print_level", 5)    
+        nlp.add_option("print_level", 0)
         nlp.add_option("max_iter", 500)
         nlp.add_option("tol", 1e-6)
 
