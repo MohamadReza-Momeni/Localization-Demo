@@ -4,30 +4,35 @@ from .base_solver import BaseSolver
 
 class RSSIDomainProblem:
 
-    def __init__(self, anchors, distances, ref_power=-40, ple=2.2):
+    # 1. Add weights to the initializer
+    def __init__(self, anchors, distances, ref_power=-40, ple=2.2, weights=None):
         self.anchors = np.asarray(anchors)
-
-        # Reverse-engineer raw RSSI values from distance estimates
-        # to preserve the existing repository pipeline structure safely
         self.rssi_meas = ref_power - 10.0 * ple * np.log10(np.asarray(distances) + 1e-9)
-
         self.ref_power = ref_power
         self.ple = ple
         self.log_factor = 10.0 * self.ple / np.log(10.0)
+        
+        # Default to unweighted (1.0) if no weights are provided
+        if weights is None:
+            self.weights = np.ones(len(anchors))
+        else:
+            self.weights = np.asarray(weights)
 
     def objective(self, position):
         dists = np.linalg.norm(self.anchors - position, axis=1) + 1e-9
         rssi_pred = self.ref_power - 10.0 * self.ple * np.log10(dists)
 
-        # Optimize inside the symmetric Gaussian RSSI decibel space
         residuals = self.rssi_meas - rssi_pred
-        return np.sum(residuals ** 2)
+        
+        # 2. Multiply the squared residuals by the weights
+        return np.sum(self.weights * (residuals ** 2))
 
     def gradient(self, position):
         px, py = position
         gradient = np.zeros(2)
 
-        for anchor, r_meas in zip(self.anchors, self.rssi_meas):
+        # 3. Zip the weights into the loop to apply them to the gradient
+        for anchor, r_meas, w in zip(self.anchors, self.rssi_meas, self.weights):
             dx = px - anchor[0]
             dy = py - anchor[1]
             d2 = dx ** 2 + dy ** 2 + 1e-9
@@ -35,12 +40,13 @@ class RSSIDomainProblem:
 
             r_pred = self.ref_power - 10.0 * self.ple * np.log10(d)
             residual = r_meas - r_pred
-
-            dr_dx = (self.log_factor * dx) / d2
-            dr_dy = (self.log_factor * dy) / d2
-
-            gradient[0] += 2.0 * residual * dr_dx
-            gradient[1] += 2.0 * residual * dr_dy
+            
+            # The chain rule derivative factor
+            grad_factor = self.log_factor * (1.0 / d2)
+            
+            # 4. Multiply the gradient step by the specific anchor's weight (w)
+            gradient[0] += 2.0 * w * residual * grad_factor * dx
+            gradient[1] += 2.0 * w * residual * grad_factor * dy
 
         return gradient
 
@@ -51,7 +57,6 @@ class RSSIDomainProblem:
         return np.array([])
 
     def hessianstructure(self):
-        # FIXED: Returns a valid Cython coordinate tuple to satisfy C-extension initializations
         return (np.array([], dtype=np.int32), np.array([], dtype=np.int32))
 
     def hessian(self, position, lagrange, obj_factor):
@@ -60,7 +65,8 @@ class RSSIDomainProblem:
 
 class IPOPTSolver(BaseSolver):
 
-    def solve(self, anchors, distances, x0=None, ref_power=-40, ple=2.2):
+    # 5. Add weights parameter to the solve method
+    def solve(self, anchors, distances, x0=None, ref_power=-40, ple=2.2, weights=None):
         try:
             import cyipopt
         except ImportError as exc:
@@ -74,25 +80,33 @@ class IPOPTSolver(BaseSolver):
         if x0 is None:
             x0 = np.mean(anchors, axis=0)
 
-        problem = RSSIDomainProblem(anchors, distances, ref_power=ref_power, ple=ple)
+        # Pass weights down into the problem formulation
+        problem = RSSIDomainProblem(
+            anchors, 
+            distances, 
+            ref_power=ref_power, 
+            ple=ple, 
+            weights=weights
+        )
 
         nlp = cyipopt.Problem(
             n=2,
             m=0,
             problem_obj=problem,
-            lb=np.array([0.0, 0.0]),  # Keep target inside tracking grid
-            ub=np.array([1000.0, 1000.0]),  # Keep target inside tracking grid
+            lb=np.array([0.0, 0.0]), 
+            ub=np.array([1000.0, 1000.0]), 
             cl=np.array([]),
             cu=np.array([])
         )
 
         nlp.add_option("print_level", 0)
-        nlp.add_option("max_iter", 100)
-        nlp.add_option("hessian_approximation", "limited-memory")
+        nlp.add_option("max_iter", 500)
+        nlp.add_option("tol", 1e-6)
 
-        solution, info = nlp.solve(x0)
+        x_opt, info = nlp.solve(x0)
 
         return {
-            "solution": solution,
+            "solution": x_opt,
+            "success": info["status"] in [0, 1],
             "info": info,
         }

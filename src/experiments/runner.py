@@ -23,7 +23,7 @@ class ExperimentConfig:
     ple_range: tuple[float, float] = (2.0, 8.0)
     noise_range: tuple[float, float] = (0.0, 10.0)
 
-    solvers: tuple[str, ...] = ("vanilla", "weighted", "ipopt")
+    solvers: tuple[str, ...] = ("vanilla", "weighted", "ipopt", "weighted_ipopt")
 
 
 class ExperimentRunner:
@@ -99,6 +99,18 @@ class ExperimentRunner:
                             distances,
                             ref_power=p0, # Pass randomized P0
                             ple=ple       # Pass randomized PLE
+                        )
+                        status_code = solution["info"].get("status", -1)
+                        success = status_code in [0, 1]
+                    elif solver_name == "weighted_ipopt":
+                        # Calculate the exact same weights used for the SciPy weighted solver
+                        weights = self._compute_weights(anchors) 
+                        solution = self.ipopt_solver.solve(
+                            anchors,
+                            distances,
+                            ref_power=p0, 
+                            ple=ple,
+                            weights=weights # Pass them in!
                         )
                         status_code = solution["info"].get("status", -1)
                         success = status_code in [0, 1]

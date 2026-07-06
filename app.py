@@ -25,7 +25,7 @@ lat0 = 35.7152
 lon0 = 51.4043
 
 # --- 2. EXECUTION ---
-if st.sidebar.button("🚀 Run Simulation", type="primary"):
+if st.sidebar.button("Run Simulation", type="primary"):
     
     with st.spinner("Running batch experiments with randomized variables..."):
         
@@ -53,7 +53,7 @@ if st.sidebar.button("🚀 Run Simulation", type="primary"):
         
         csv_data = results.to_csv(index=False).encode('utf-8')
         st.download_button(
-            label="📥 Download Full Results (CSV)",
+            label="Download Full Results (CSV)",
             data=csv_data,
             file_name="localization_results.csv",
             mime="text/csv",
@@ -77,4 +77,4 @@ if st.sidebar.button("🚀 Run Simulation", type="primary"):
         html_data = f.read()
         components.html(html_data, height=600)
 else:
-    st.info("👈 Adjust parameters in the sidebar and click 'Run Simulation' to start.")
+    st.info("Adjust parameters in the sidebar and click 'Run Simulation' to start.")
