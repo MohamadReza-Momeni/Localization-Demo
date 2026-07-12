@@ -4,14 +4,15 @@ from src.localization.ipopt_solver import IPOPTSolver
 from src.localization.particle_filter_solver import ParticleFilterSolver
 from src.experiments.context import RunContext
 
+
 class SolverRegistry:
     """OCP: To add a new solver, just add a new method and register it in the dictionary."""
-    
+
     def __init__(self, x_range, y_range):
         self.scipy_solver = SciPyLocalizationSolver()
         self.ipopt_solver = IPOPTSolver()
         self.pf_solver = ParticleFilterSolver(x_bounds=x_range, y_bounds=y_range)
-        
+
         # THE STRATEGY DICTIONARY
         self.strategies = {
             "vanilla": self._run_vanilla,
@@ -29,29 +30,42 @@ class SolverRegistry:
 
     # --- INDIVIDUAL STRATEGIES ---
 
-    def _compute_weights(self, anchors):
-        d = np.linalg.norm(anchors - np.mean(anchors, axis=0), axis=1)
-        return 1.0 / (d + 1e-6)
+    def _compute_weights(self, anchors, baseline_guess):
+        # Weight anchors by proximity to the current position estimate, not to the
+        # anchor centroid — closer anchors are generally more reliable in log-distance
+        # RSSI models. BUT: keep this mild. Squaring or otherwise over-sharpening this
+        # can let one nearby anchor dominate the objective, making the 2-anchor problem
+        # nearly rank-deficient and letting the optimizer run off along the flat direction.
+        d = np.linalg.norm(anchors - baseline_guess, axis=1)
+        raw_weights = 1.0 / (d + 1.0)  # linear (not squared) inverse distance, +1 to soften near-zero d
+
+        # Normalize so mean weight = 1: keeps the objective's overall scale stable across
+        # runs and prevents any single anchor's weight from swamping the rest.
+        raw_weights = raw_weights / np.mean(raw_weights)
+
+        # Hard cap on the weight ratio so no anchor can be weighted more than 5x any other,
+        # preserving enough multilateration geometry for the optimizer to stay well-conditioned.
+        return np.clip(raw_weights, 0.2, 5.0)
 
     def _run_vanilla(self, ctx: RunContext):
         return self.scipy_solver.solve(ctx.anchors, ctx.distances)
 
     def _run_weighted(self, ctx: RunContext):
-        weights = self._compute_weights(ctx.anchors)
+        weights = self._compute_weights(ctx.anchors, ctx.baseline_guess)
         return self.scipy_solver.solve(ctx.anchors, ctx.distances, weights=weights)
 
     def _run_ipopt(self, ctx: RunContext):
         sol = self.ipopt_solver.solve(
-            ctx.anchors, ctx.distances, ref_power=ctx.p0, ple=ctx.ple, 
+            ctx.anchors, ctx.distances, ref_power=ctx.p0, ple=ctx.ple,
             x0=ctx.baseline_guess, x_range=ctx.x_range, y_range=ctx.y_range
         )
         sol["success"] = sol["info"].get("status", -1) in [0, 1]
         return sol
 
     def _run_weighted_ipopt(self, ctx: RunContext):
-        weights = self._compute_weights(ctx.anchors)
+        weights = self._compute_weights(ctx.anchors, ctx.baseline_guess)
         sol = self.ipopt_solver.solve(
-            ctx.anchors, ctx.distances, ref_power=ctx.p0, ple=ctx.ple, 
+            ctx.anchors, ctx.distances, ref_power=ctx.p0, ple=ctx.ple,
             weights=weights, x0=ctx.baseline_guess, x_range=ctx.x_range, y_range=ctx.y_range
         )
         sol["success"] = sol["info"].get("status", -1) in [0, 1]

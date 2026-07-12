@@ -1,18 +1,28 @@
 import numpy as np
 from .base_solver import BaseSolver
 
+
 class ParticleFilterSolver(BaseSolver):
-    # UPDATED: Accept X and Y bounds separately
-    def __init__(self, num_particles=2000, num_iterations=15, x_bounds=(0, 1000), y_bounds=(0, 1000)):
+    # UPDATED: Accept X and Y bounds separately, and measurement_sigma as a tunable param.
+    # measurement_sigma was hardcoded at 20.0m, far smaller than typical real RSSI-derived
+    # distance errors (often 50-200m+ given realistic path-loss/noise). That mismatch made
+    # the likelihood function overly peaked, causing rapid particle depletion around
+    # whichever particles happened to be near the initial x0 (vanilla) scatter — meaning
+    # the filter never really explored beyond vanilla's answer instead of doing genuine
+    # independent Bayesian refinement. Raise this (or better: derive it from your actual
+    # noise config) so the filter's likelihood matches the real measurement noise scale.
+    def __init__(self, num_particles=2000, num_iterations=15, x_bounds=(0, 1000), y_bounds=(0, 1000),
+                 measurement_sigma=75.0):
         self.num_particles = num_particles
         self.num_iterations = num_iterations
         self.x_bounds = x_bounds
         self.y_bounds = y_bounds
+        self.measurement_sigma = measurement_sigma
 
     def solve(self, anchors, distances, x0=None):
         anchors = np.asarray(anchors)
         distances = np.asarray(distances)
-        
+
         if x0 is not None:
             particles = np.random.normal(loc=x0, scale=150.0, size=(self.num_particles, 2))
         else:
@@ -28,7 +38,7 @@ class ParticleFilterSolver(BaseSolver):
         for iteration in range(self.num_iterations):
             jitter_scale = max(5.0, 50.0 / (iteration + 1))
             particles += np.random.normal(0, jitter_scale, size=particles.shape)
-            
+
             # UPDATED: Clip X and Y independently during iteration
             particles[:, 0] = np.clip(particles[:, 0], self.x_bounds[0], self.x_bounds[1])
             particles[:, 1] = np.clip(particles[:, 1], self.y_bounds[0], self.y_bounds[1])
@@ -36,15 +46,15 @@ class ParticleFilterSolver(BaseSolver):
             diff = particles[:, np.newaxis, :] - anchors[np.newaxis, :, :]
             est_distances = np.linalg.norm(diff, axis=2)
             errors = np.abs(est_distances - distances)
-            
-            measurement_sigma = 20.0 
-            weights = np.exp(-np.sum(errors**2, axis=1) / (2 * measurement_sigma**2))
+
+            measurement_sigma = self.measurement_sigma
+            weights = np.exp(-np.sum(errors ** 2, axis=1) / (2 * measurement_sigma ** 2))
 
             weight_sum = np.sum(weights)
             if weight_sum == 0 or np.isnan(weight_sum):
                 weights = np.ones(self.num_particles) / self.num_particles
             else:
-                weights /= weight_sum  
+                weights /= weight_sum
 
             indices = np.random.choice(self.num_particles, size=self.num_particles, p=weights, replace=True)
             particles = particles[indices]
