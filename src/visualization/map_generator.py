@@ -41,11 +41,14 @@ class LocalizationVisualizer:
             tiles="OpenTopoMap"  # <-- Add this line
         )
 
+        x_min, x_max = self.x_range
+        y_min, y_max = self.y_range
+
         corners_enu = [
-            [0, 0],  # Bottom-Left
-            [1000, 0],  # Bottom-Right
-            [1000, 1000],  # Top-Right
-            [0, 1000]  # Top-Left
+            [x_min, y_min],  # Bottom-Left
+            [x_max, y_min],  # Bottom-Right
+            [x_max, y_max],  # Top-Right
+            [x_min, y_max]   # Top-Left
         ]
 
         boundary_coords = [self.converter.to_latlon(c[0], c[1]) for c in corners_enu]
@@ -57,7 +60,7 @@ class LocalizationVisualizer:
             fill=True,
             fill_color="red",
             fill_opacity=0.06,
-            popup="Simulation Boundaries (1000m x 1000m)"
+            popup=f"Simulation Boundaries ({x_max - x_min}m x {y_max - y_min}m)"
         ).add_to(m)
 
         for idx, anchor in enumerate(anchors_enu):
