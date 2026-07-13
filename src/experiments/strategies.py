@@ -48,11 +48,13 @@ class SolverRegistry:
         return np.clip(raw_weights, 0.2, 5.0)
 
     def _run_vanilla(self, ctx: RunContext):
-        return self.scipy_solver.solve(ctx.anchors, ctx.distances)
+        return self.scipy_solver.solve(ctx.anchors, ctx.distances, x_range=ctx.x_range, y_range=ctx.y_range)
 
     def _run_weighted(self, ctx: RunContext):
         weights = self._compute_weights(ctx.anchors, ctx.baseline_guess)
-        return self.scipy_solver.solve(ctx.anchors, ctx.distances, weights=weights)
+        return self.scipy_solver.solve(
+            ctx.anchors, ctx.distances, weights=weights, x_range=ctx.x_range, y_range=ctx.y_range
+        )
 
     def _run_ipopt(self, ctx: RunContext):
         sol = self.ipopt_solver.solve(
