@@ -4,49 +4,34 @@ from .base_solver import BaseSolver
 
 class RSSIDomainProblem:
 
-    # 1. Add weights to the initializer
     def __init__(self, anchors, distances, ref_power=-40, ple=2.2, weights=None):
         self.anchors = np.asarray(anchors)
-        self.rssi_meas = ref_power - 10.0 * ple * np.log10(np.asarray(distances) + 1e-9)
+        self.measured_distances = np.asarray(distances, dtype=float)
         self.ref_power = ref_power
         self.ple = ple
-        self.log_factor = 10.0 * self.ple / np.log(10.0)
-        
-        # Default to unweighted (1.0) if no weights are provided
+
         if weights is None:
             self.weights = np.ones(len(anchors))
         else:
-            self.weights = np.asarray(weights)
+            self.weights = np.asarray(weights, dtype=float)
 
     def objective(self, position):
-        dists = np.linalg.norm(self.anchors - position, axis=1) + 1e-9
-        rssi_pred = self.ref_power - 10.0 * self.ple * np.log10(dists)
-
-        residuals = self.rssi_meas - rssi_pred
-        
-        # 2. Multiply the squared residuals by the weights
+        predicted_distances = np.linalg.norm(self.anchors - position, axis=1) + 1e-9
+        residuals = self.measured_distances - predicted_distances
         return np.sum(self.weights * (residuals ** 2))
 
     def gradient(self, position):
         px, py = position
         gradient = np.zeros(2)
 
-        # 3. Zip the weights into the loop to apply them to the gradient
-        for anchor, r_meas, w in zip(self.anchors, self.rssi_meas, self.weights):
+        for anchor, dist_meas, w in zip(self.anchors, self.measured_distances, self.weights):
             dx = px - anchor[0]
             dy = py - anchor[1]
-            d2 = dx ** 2 + dy ** 2 + 1e-9
-            d = np.sqrt(d2)
+            d = np.sqrt(dx ** 2 + dy ** 2 + 1e-9)
 
-            r_pred = self.ref_power - 10.0 * self.ple * np.log10(d)
-            residual = r_meas - r_pred
-            
-            # The chain rule derivative factor
-            grad_factor = self.log_factor * (1.0 / d2)
-            
-            # 4. Multiply the gradient step by the specific anchor's weight (w)
-            gradient[0] += 2.0 * w * residual * grad_factor * dx
-            gradient[1] += 2.0 * w * residual * grad_factor * dy
+            residual = dist_meas - d
+            gradient[0] += -2.0 * w * residual * dx / d
+            gradient[1] += -2.0 * w * residual * dy / d
 
         return gradient
 
