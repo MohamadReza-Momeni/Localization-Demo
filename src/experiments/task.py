@@ -46,7 +46,12 @@ class SimulationTask:
                 est = solution["solution"]
                 results.append({
                     "run_id": run_id, "target_id": target_id, "solver": solver_name,
-                    "anchor_count": self.config.anchor_count, "true_x": true_position[0], "true_y": true_position[1],
+                    "anchor_count": self.config.anchor_count, 
+                    "map_width": self.config.x_range[1],  
+                    "map_height": self.config.y_range[1],
+                    "lat0": self.config.lat0,
+                    "lon0": self.config.lon0,  
+                    "true_x": true_position[0], "true_y": true_position[1],
                     "est_x": est[0], "est_y": est[1], "error": euclidean_error(true_position, est),
                     "success": solution["success"], "p0": p0, "ple": ple, "sigma": sigma
                 })

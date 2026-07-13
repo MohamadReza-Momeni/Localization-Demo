@@ -7,6 +7,9 @@ class ExperimentConfig:
     target_count: int = 1
     x_range: tuple[float, float] = (0, 1000)
     y_range: tuple[float, float] = (0, 1000)
+
+    lat0: float = 35.7152
+    lon0: float = 51.4043
     
     p0_range: tuple[float, float] = (-50.0, 50.0)
     ple_range: tuple[float, float] = (2.0, 8.0)

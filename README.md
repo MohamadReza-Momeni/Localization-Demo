@@ -67,7 +67,6 @@ This framework tests targets against several distinct mathematical approaches:
 ```bash
 git clone https://github.com/yourusername/localization_demo.git
 cd localization_demo
-
 ```
 
 
@@ -75,14 +74,12 @@ cd localization_demo
 ```bash
 python -m venv venv
 source venv/bin/activate  # On Windows use: venv\Scripts\activate
-
 ```
 
 
 3. **Install Dependencies:**
 ```bash
 pip install -r requirements.txt
-
 ```
 
 
@@ -94,7 +91,6 @@ Launch the interactive web dashboard using Streamlit:
 
 ```bash
 streamlit run app.py
-
 ```
 
 1. Open your browser to the local URL provided (usually `http://localhost:8501`).
