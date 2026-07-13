@@ -1,3 +1,4 @@
+import json
 import numpy as np
 from src.evaluation.metrics import euclidean_error
 from src.scenario.anchors import AnchorGenerator
@@ -9,8 +10,9 @@ from src.experiments.config import ExperimentConfig
 from src.experiments.context import RunContext
 from src.experiments.strategies import SolverRegistry
 
+
 class SimulationTask:
-    
+
     def __init__(self, config: ExperimentConfig):
         self.config = config
         # Initialize our OCP Strategy Registry
@@ -19,14 +21,20 @@ class SimulationTask:
     def execute(self, run_id: int) -> list[dict]:
         p0, ple, sigma = self._sample_environment_variables()
         anchors, targets = self._generate_scenario(run_id)
-        
+
+        # Serialize the actual anchor positions used in this run. Anchors are generated
+        # with a random seed (not derived from run_id), so they can no longer be
+        # reproduced later just by re-seeding — we must persist the exact coordinates
+        # so map_generator.py can plot the anchors that were really used.
+        anchors_json = json.dumps(anchors.tolist())
+
         model = RSSIModel(reference_power=p0, path_loss_exponent=ple, noise_std=sigma)
         rssi_matrix = model.rssi_matrix(anchors, targets)
 
         results = []
         for target_id, true_position in enumerate(targets):
             distances = self._calculate_distances(rssi_matrix[:, target_id], p0, ple)
-            
+
             # WARM START CALCULATION
             baseline_guess = self.registry.execute_solver("vanilla", RunContext(
                 anchors, distances, None, p0, ple, self.config.x_range, self.config.y_range
@@ -39,21 +47,21 @@ class SimulationTask:
 
             # CLEAN EVALUATION LOOP
             for solver_name in self.config.solvers:
-                
                 # MAGIC HAPPENS HERE: No if statements!
                 solution = self.registry.execute_solver(solver_name, ctx)
-                
+
                 est = solution["solution"]
                 results.append({
                     "run_id": run_id, "target_id": target_id, "solver": solver_name,
-                    "anchor_count": self.config.anchor_count, 
-                    "map_width": self.config.x_range[1],  
+                    "anchor_count": self.config.anchor_count,
+                    "map_width": self.config.x_range[1],
                     "map_height": self.config.y_range[1],
                     "lat0": self.config.lat0,
-                    "lon0": self.config.lon0,  
+                    "lon0": self.config.lon0,
                     "true_x": true_position[0], "true_y": true_position[1],
                     "est_x": est[0], "est_y": est[1], "error": euclidean_error(true_position, est),
-                    "success": solution["success"], "p0": p0, "ple": ple, "sigma": sigma
+                    "success": solution["success"], "p0": p0, "ple": ple, "sigma": sigma,
+                    "anchors": anchors_json,
                 })
 
         return results
@@ -67,14 +75,19 @@ class SimulationTask:
         return p0, ple, sigma
 
     def _generate_scenario(self, run_id: int):
+        # Anchors and targets both use genuinely random seeds (seed=None -> OS entropy)
+        # instead of fixed seeds derived from run_id. This means every run gets a
+        # different anchor layout AND a different target position, even if you re-run
+        # main.py/app.py with the same run_id. Safe under ProcessPoolExecutor/threads:
+        # numpy's default_rng(None) pulls fresh OS entropy per process/call.
         anchors = AnchorGenerator(
-            self.config.anchor_count, self.config.x_range, self.config.y_range, seed=42 + run_id
+            self.config.anchor_count, self.config.x_range, self.config.y_range, seed=None
         ).generate()
-        
+
         targets = TargetGenerator(
-            self.config.target_count, self.config.x_range, self.config.y_range, seed=1 + run_id
+            self.config.target_count, self.config.x_range, self.config.y_range, seed=None
         ).generate()
-        
+
         return anchors, targets
 
     def _calculate_distances(self, rssi_values, p0, ple):

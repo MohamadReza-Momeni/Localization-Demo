@@ -1,12 +1,22 @@
 import os
+import json
 import folium
 import numpy as np
 import pandas as pd
 from src.geo.enu import ENUConverter
-from src.scenario.anchors import AnchorGenerator
 
 
 class LocalizationVisualizer:
+    # Fixed, distinct color per solver so every algorithm is visually distinguishable on the map
+    SOLVER_COLORS = {
+        "vanilla": "orange",
+        "weighted": "purple",
+        "ipopt": "blue",
+        "weighted_ipopt": "darkred",
+        "particle_filter": "darkgreen",
+    }
+    FALLBACK_COLORS = ["cadetblue", "black", "pink", "gray", "lightred"]
+
     # ADDED: x_range and y_range parameters
     def __init__(self, lat0, lon0, x_range=(0, 1000), y_range=(0, 1000), results_path="results.csv"):
         self.converter = ENUConverter(lat0, lon0)
@@ -18,6 +28,14 @@ class LocalizationVisualizer:
             raise FileNotFoundError(f"No results file found at {results_path}. Run experiments first!")
         self.df = pd.read_csv(results_path)
 
+    def _color_for_solver(self, solver_name):
+        """Returns a stable color for a solver name, falling back gracefully for unknown solvers."""
+        if solver_name in self.SOLVER_COLORS:
+            return self.SOLVER_COLORS[solver_name]
+        # Deterministic fallback so an unrecognized solver still gets a consistent color across markers
+        idx = abs(hash(solver_name)) % len(self.FALLBACK_COLORS)
+        return self.FALLBACK_COLORS[idx]
+
     def generate_run_map(self, run_id=0, output_filename=None):
         run_data = self.df[self.df["run_id"] == run_id]
         if run_data.empty:
@@ -28,11 +46,15 @@ class LocalizationVisualizer:
 
         anchor_count = run_data["anchor_count"].iloc[0]
 
-        anchor_seed = 42 + run_id
-        # UPDATED: Use dynamic bounds instead of (0, 1000)
-        anchors_enu = AnchorGenerator(
-            anchor_count, self.x_range, self.y_range, seed=anchor_seed
-        ).generate()
+        # UPDATED: anchors are no longer regenerated from a seed (anchor generation is
+        # now random per run, so a seed can't reproduce it). Instead we read back the
+        # exact anchor coordinates that were used and saved into results.csv for this run.
+        if "anchors" not in run_data.columns:
+            raise ValueError(
+                "results.csv has no 'anchors' column. Re-run main.py with the updated "
+                "task.py that persists anchor coordinates per run."
+            )
+        anchors_enu = np.array(json.loads(run_data["anchors"].iloc[0]))
 
         m = folium.Map(
             location=[self.converter.lat0, self.converter.lon0],
@@ -41,9 +63,9 @@ class LocalizationVisualizer:
             tiles="OpenTopoMap"  # <-- Add this line
         )
 
+        # FIXED: previously hardcoded to (0,1000); now respects the actual configured bounds
         x_min, x_max = self.x_range
         y_min, y_max = self.y_range
-
         corners_enu = [
             [x_min, y_min],  # Bottom-Left
             [x_max, y_min],  # Bottom-Right
@@ -60,7 +82,7 @@ class LocalizationVisualizer:
             fill=True,
             fill_color="red",
             fill_opacity=0.06,
-            popup=f"Simulation Boundaries ({x_max - x_min}m x {y_max - y_min}m)"
+            popup=f"Simulation Boundaries ({x_max - x_min:.0f}m x {y_max - y_min:.0f}m)"
         ).add_to(m)
 
         for idx, anchor in enumerate(anchors_enu):
@@ -98,7 +120,7 @@ class LocalizationVisualizer:
                 solver_name = row["solver"]
                 error_m = row["error"]
 
-                color = "orange" if solver_name == "vanilla" else "purple"
+                color = self._color_for_solver(solver_name)
 
                 # Plot Estimated Position
                 folium.CircleMarker(
@@ -107,6 +129,7 @@ class LocalizationVisualizer:
                     color=color,
                     fill=True,
                     fill_color=color,
+                    fill_opacity=0.9,
                     popup=f"Est: {solver_name}<br>Error: {error_m:.2f}m",
                 ).add_to(m)
 
@@ -118,5 +141,35 @@ class LocalizationVisualizer:
                     tooltip=f"{solver_name} displacement: {error_m:.2f}m",
                 ).add_to(m)
 
+        self._add_legend(m, run_data["solver"].unique())
+
         m.save(output_filename)
         print(f"-> Map layer successfully generated with boundaries: {output_filename}")
+
+    def _add_legend(self, m, solver_names):
+        """Adds a fixed-position HTML legend mapping each solver present to its marker color."""
+        rows = "".join(
+            f'<div style="margin:2px 0;">'
+            f'<span style="display:inline-block;width:12px;height:12px;'
+            f'background:{self._color_for_solver(name)};border-radius:50%;'
+            f'margin-right:6px;"></span>{name}</div>'
+            for name in sorted(solver_names)
+        )
+        legend_html = f"""
+        <div style="
+            position: fixed;
+            bottom: 30px; left: 30px; z-index: 9999;
+            background: white; padding: 10px 14px;
+            border: 2px solid #444; border-radius: 6px;
+            font-size: 13px; line-height: 1.3;
+            box-shadow: 2px 2px 6px rgba(0,0,0,0.3);
+        ">
+            <div style="font-weight:bold; margin-bottom:4px;">Solver</div>
+            <div style="margin:2px 0;">
+                <span style="display:inline-block;width:12px;height:12px;
+                background:green;border-radius:50%;margin-right:6px;"></span>True Target
+            </div>
+            {rows}
+        </div>
+        """
+        m.get_root().html.add_child(folium.Element(legend_html))
