@@ -15,21 +15,19 @@ class SimulationTask:
 
     def __init__(self, config: ExperimentConfig):
         self.config = config
-        # Initialize our OCP Strategy Registry
         self.registry = SolverRegistry(config.x_range, config.y_range)
 
-    def execute(self, run_id: int) -> list[dict]:
-        p0, ple, sigma = self._sample_environment_variables()
+    def execute(self, params: tuple[int, float, float, float]) -> list[dict]:
+        # NEW: Unpack the exact parameters dictated by the Grid Search executor
+        run_id, p0, ple, sigma = params
+        
+        # Generate reproducible map based on run_id.
         anchors, targets = self._generate_scenario(run_id)
 
-        # Serialize the actual anchor positions used in this run. Anchors are generated
-        # with a random seed (not derived from run_id), so they can no longer be
-        # reproduced later just by re-seeding — we must persist the exact coordinates
-        # so map_generator.py can plot the anchors that were really used.
         anchors_json = json.dumps(anchors.tolist())
 
         model = RSSIModel(reference_power=p0, path_loss_exponent=ple, noise_std=sigma)
-        rssi_matrix = model.rssi_matrix(anchors, targets)
+        rssi_matrix = model.rssi_matrix(anchors, targets, samples=self.config.samples_per_anchor)
 
         results = []
         for target_id, true_position in enumerate(targets):
@@ -54,13 +52,15 @@ class SimulationTask:
                 results.append({
                     "run_id": run_id, "target_id": target_id, "solver": solver_name,
                     "anchor_count": self.config.anchor_count,
+                    "samples_per_anchor": self.config.samples_per_anchor,
                     "map_width": self.config.x_range[1],
                     "map_height": self.config.y_range[1],
                     "lat0": self.config.lat0,
                     "lon0": self.config.lon0,
                     "true_x": true_position[0], "true_y": true_position[1],
                     "est_x": est[0], "est_y": est[1], "error": euclidean_error(true_position, est),
-                    "success": solution["success"], "p0": p0, "ple": ple, "sigma": sigma,
+                    "success": solution["success"], 
+                    "p0": p0, "ple": ple, "sigma": sigma, # Exact grid parameters used
                     "anchors": anchors_json,
                 })
 
@@ -68,24 +68,15 @@ class SimulationTask:
 
     # --- HELPER METHODS ---
 
-    def _sample_environment_variables(self) -> tuple[float, float, float]:
-        p0 = np.random.uniform(self.config.p0_range[0], self.config.p0_range[1])
-        ple = np.random.uniform(self.config.ple_range[0], self.config.ple_range[1])
-        sigma = np.random.uniform(self.config.noise_range[0], self.config.noise_range[1])
-        return p0, ple, sigma
-
     def _generate_scenario(self, run_id: int):
-        # Anchors and targets both use genuinely random seeds (seed=None -> OS entropy)
-        # instead of fixed seeds derived from run_id. This means every run gets a
-        # different anchor layout AND a different target position, even if you re-run
-        # main.py/app.py with the same run_id. Safe under ProcessPoolExecutor/threads:
-        # numpy's default_rng(None) pulls fresh OS entropy per process/call.
+        # Grid Search requires that we test the *exact same* room layout across different noise levels!
+        # Therefore, we link the generation seed strictly to the run_id.
         anchors = AnchorGenerator(
-            self.config.anchor_count, self.config.x_range, self.config.y_range, seed=None
+            self.config.anchor_count, self.config.x_range, self.config.y_range, seed=42 + run_id
         ).generate()
 
         targets = TargetGenerator(
-            self.config.target_count, self.config.x_range, self.config.y_range, seed=None
+            self.config.target_count, self.config.x_range, self.config.y_range, seed=1 + run_id
         ).generate()
 
         return anchors, targets

@@ -19,20 +19,23 @@ class RSSIModel:
         self.sigma = noise_std
         self.d0 = reference_distance
 
-    def rssi(self, distance):
+    def rssi(self, distance, samples=1):
         distance = max(distance, np.finfo(float).eps)
-        noise = np.random.normal(0, self.noise_std)
+        
+        # If samples > 1, draw multiple noise measurements and average them
+        noise = np.mean(np.random.normal(0, self.noise_std, samples))
+        
         path_loss = 10 * self.path_loss_exponent * np.log10(
             distance / self.reference_distance
         )
         return self.reference_power - path_loss + noise
 
-    def rssi_matrix(self, anchors, targets):
+    def rssi_matrix(self, anchors, targets, samples=1):
         rssi_values = np.zeros((len(anchors), len(targets)))
 
         for anchor_index, anchor in enumerate(anchors):
             for target_index, target in enumerate(targets):
                 distance = np.linalg.norm(anchor - target)
-                rssi_values[anchor_index, target_index] = self.rssi(distance)
+                rssi_values[anchor_index, target_index] = self.rssi(distance, samples)
 
         return rssi_values
