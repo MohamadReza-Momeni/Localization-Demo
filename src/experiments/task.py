@@ -17,19 +17,18 @@ class SimulationTask:
         self.config = config
         self.registry = SolverRegistry(config.x_range, config.y_range)
 
-    def execute(self, params: tuple[int, float, float, float]) -> list[dict]:
-        # NEW: Unpack the exact parameters dictated by the Grid Search executor
+    def execute(self, params: tuple[int, float, float, float]) -> tuple[list[dict], list[dict]]:
         run_id, p0, ple, sigma = params
         
-        # Generate reproducible map based on run_id.
         anchors, targets = self._generate_scenario(run_id)
-
         anchors_json = json.dumps(anchors.tolist())
 
         model = RSSIModel(reference_power=p0, path_loss_exponent=ple, noise_std=sigma)
-        rssi_matrix = model.rssi_matrix(anchors, targets, samples=self.config.samples_per_anchor)
+        rssi_matrix, raw_samples = model.rssi_matrix(anchors, targets, samples=self.config.samples_per_anchor)
 
-        results = []
+        solver_results = []
+        measurement_results = []
+
         for target_id, true_position in enumerate(targets):
             distances = self._calculate_distances(rssi_matrix[:, target_id], p0, ple)
 
@@ -38,39 +37,62 @@ class SimulationTask:
                 anchors, distances, None, p0, ple, self.config.x_range, self.config.y_range
             ))["solution"]
 
-            # CREATE CONTEXT
             ctx = RunContext(
                 anchors, distances, baseline_guess, p0, ple, self.config.x_range, self.config.y_range
             )
 
-            # CLEAN EVALUATION LOOP
+            # 1. SOLVER LOOP (Builds the original table)
             for solver_name in self.config.solvers:
-                # MAGIC HAPPENS HERE: No if statements!
                 solution = self.registry.execute_solver(solver_name, ctx)
-
                 est = solution["solution"]
-                results.append({
+                solver_results.append({
                     "run_id": run_id, "target_id": target_id, "solver": solver_name,
                     "anchor_count": self.config.anchor_count,
                     "samples_per_anchor": self.config.samples_per_anchor,
-                    "map_width": self.config.x_range[1],
-                    "map_height": self.config.y_range[1],
-                    "lat0": self.config.lat0,
-                    "lon0": self.config.lon0,
+                    "map_width": self.config.x_range[1], "map_height": self.config.y_range[1],
+                    "lat0": self.config.lat0, "lon0": self.config.lon0,
                     "true_x": true_position[0], "true_y": true_position[1],
                     "est_x": est[0], "est_y": est[1], "error": euclidean_error(true_position, est),
                     "success": solution["success"], 
-                    "p0": p0, "ple": ple, "sigma": sigma, # Exact grid parameters used
+                    "p0": p0, "ple": ple, "sigma": sigma,
                     "anchors": anchors_json,
                 })
 
-        return results
+            # 2. RAW MEASUREMENT LOOP (Builds the new table)
+            for anchor_id, anchor in enumerate(anchors):
+                true_distance = np.linalg.norm(anchor - true_position)
+                # This is the estimated distance calculated from the *averaged* RSSI
+                est_distance = distances[anchor_id] 
+                
+                for sample_id, raw_rssi in enumerate(raw_samples[anchor_id, target_id]):
+                    measurement_results.append({
+                        "run_id": run_id,
+                        "target_id": target_id,
+                        "anchor_id": anchor_id,
+                        "sample_id": sample_id,
+                        "map_width": self.config.x_range[1],
+                        "map_height": self.config.y_range[1],
+                        "lat0": self.config.lat0,
+                        "lon0": self.config.lon0,
+                        "true_x": true_position[0],
+                        "true_y": true_position[1],
+                        "anchor_x": anchor[0],
+                        "anchor_y": anchor[1],
+                        "p0": p0,
+                        "ple": ple,
+                        "sigma": sigma,
+                        "raw_rssi": raw_rssi,
+                        "true_distance": true_distance,
+                        "est_distance": est_distance,
+                        "error_distance": abs(true_distance - est_distance)
+                    })
+
+        # Notice how this now returns TWO lists instead of one
+        return solver_results, measurement_results
 
     # --- HELPER METHODS ---
 
     def _generate_scenario(self, run_id: int):
-        # Grid Search requires that we test the *exact same* room layout across different noise levels!
-        # Therefore, we link the generation seed strictly to the run_id.
         anchors = AnchorGenerator(
             self.config.anchor_count, self.config.x_range, self.config.y_range, seed=42 + run_id
         ).generate()

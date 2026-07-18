@@ -22,10 +22,15 @@ if is_ready:
         task = SimulationTask(config)
         executor = BatchExecutor(task)
         
-        results = executor.run(run_count=runs_count)
-        ResultExporter.save_csv(results) 
+        # UPDATED: We now catch both DataFrames returned by the Executor
+        solver_results, measurement_results = executor.run(run_count=runs_count)
         
-        st.session_state["results"] = results
+        # Save the primary solver results
+        ResultExporter.save_csv(solver_results) 
+        
+        # Save both to session state
+        st.session_state["results"] = solver_results
+        st.session_state["measurements"] = measurement_results
         st.session_state["config"] = config
         st.session_state["total_runs"] = runs_count
         
@@ -34,19 +39,24 @@ if is_ready:
 # --- 3. DISPLAY DELEGATION ---
 if "results" in st.session_state:
     results = st.session_state["results"]
+    measurements = st.session_state["measurements"]
     saved_config = st.session_state["config"]
     total_runs = st.session_state["total_runs"]
 
     st.markdown("---")
     st.subheader("Geospatial Map Visualization")
     
-    selected_run = st.slider(
-        "Select Run ID to Visualize", 
-        min_value=0, 
-        max_value=total_runs - 1, 
-        value=0,
-        help="Slide to see how the anchors and targets randomized for different runs!"
-    )
+    if total_runs > 1:
+        selected_run = st.slider(
+            "Select Run ID to Visualize", 
+            min_value=0, 
+            max_value=total_runs - 1, 
+            value=0,
+            help="Slide to see how the anchors and targets randomized for different runs!"
+        )
+    else:
+        selected_run = 0
+        st.info("Displaying the map for Run 0.")
     
     visualizer = LocalizationVisualizer(
         lat0=saved_config.lat0, lon0=saved_config.lon0, 
@@ -60,8 +70,21 @@ if "results" in st.session_state:
         html_data = f.read()
         components.html(html_data, height=600)
 
-    # --- Call Plotting Helpers ---
+    # --- Call Plotting Helpers for the Main Table ---
     render_data_preview(results)
+    
+    # --- NEW: Raw Measurements Section ---
+    st.markdown("---")
+    st.subheader("Raw Measurement Data")
+    st.dataframe(measurements.head(10), use_container_width=True)
+    st.download_button(
+        label="Download Raw Measurements (CSV)", 
+        data=measurements.to_csv(index=False).encode('utf-8'),
+        file_name="raw_measurements.csv", 
+        mime="text/csv", 
+        use_container_width=True
+    )
+
     render_heatmap(results, saved_config.x_range[1], saved_config.y_range[1])
     render_boxplot(results)
 
