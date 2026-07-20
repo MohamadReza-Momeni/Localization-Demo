@@ -1,6 +1,8 @@
 import numpy as np
 from src.localization.scipy_solver import SciPyLocalizationSolver
 from src.localization.ipopt_solver import IPOPTSolver
+from src.localization.ipopt_solver_new import IPOPTSolver as NewIPOPTSolver
+from src.localization.ipopt_params import IPOPTHyperparams
 from src.localization.particle_filter_solver import ParticleFilterSolver
 from src.localization.ampl_solver import AMPLSolver
 from src.experiments.context import RunContext
@@ -12,6 +14,7 @@ class SolverRegistry:
     def __init__(self, x_range, y_range):
         self.scipy_solver = SciPyLocalizationSolver()
         self.ipopt_solver = IPOPTSolver()
+        self.ipopt_new_solver = NewIPOPTSolver()
         self.pf_solver = ParticleFilterSolver(x_bounds=x_range, y_bounds=y_range)
         self.ampl_solver = AMPLSolver(solver_name="bonmin")
 
@@ -22,7 +25,8 @@ class SolverRegistry:
             "ipopt": self._run_ipopt,
             "weighted_ipopt": self._run_weighted_ipopt,
             "particle_filter": self._run_pf,
-            "ampl_bonmin": self._run_ampl_bonmin
+            "ampl_bonmin": self._run_ampl_bonmin,
+            "ipopt_new": self._run_ipopt_new
         }
 
     def execute_solver(self, solver_name: str, context: RunContext):
@@ -109,3 +113,14 @@ class SolverRegistry:
 
     def _run_ampl_bonmin(self, ctx: RunContext):
         return self.ampl_solver.solve(ctx)
+
+    def _run_ipopt_new(self, ctx: RunContext):
+        # We pass exact Hessian hyperparameters to the new mathematically robust solver
+        hyp = IPOPTHyperparams(hessian_approximation="exact") 
+        sol = self.ipopt_new_solver.solve(
+            ctx.anchors, ctx.distances, ref_power=ctx.p0, ple=ctx.ple,
+            x0=ctx.baseline_guess, x_range=ctx.x_range, y_range=ctx.y_range,
+            hyperparams=hyp
+        )
+        sol["success"] = sol.get("success", False)
+        return sol
