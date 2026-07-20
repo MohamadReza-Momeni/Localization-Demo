@@ -28,5 +28,9 @@ class BatchExecutor:
                 all_solver_rows.extend(solver_rows)
                 all_measurement_rows.extend(measurement_rows)
                 
+        # for params in job_parameters:
+        #     solver_rows, measurement_rows = self.task.execute(params)
+        #     all_solver_rows.extend(solver_rows)
+        #     all_measurement_rows.extend(measurement_rows)
         # Returns TWO DataFrames back to app.py
         return pd.DataFrame(all_solver_rows), pd.DataFrame(all_measurement_rows)

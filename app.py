@@ -1,5 +1,11 @@
 import streamlit as st
 import streamlit.components.v1 as components
+import os
+
+os.environ["OPENBLAS_NUM_THREADS"] = "1"
+os.environ["OMP_NUM_THREADS"] = "1"
+os.environ["MKL_NUM_THREADS"] = "1"
+os.environ["NUMEXPR_NUM_THREADS"] = "1"
 
 from src.experiments.task import SimulationTask
 from src.experiments.executor import BatchExecutor
