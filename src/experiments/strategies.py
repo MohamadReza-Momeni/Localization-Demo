@@ -2,6 +2,7 @@ import numpy as np
 from src.localization.scipy_solver import SciPyLocalizationSolver
 from src.localization.ipopt_solver import IPOPTSolver
 from src.localization.particle_filter_solver import ParticleFilterSolver
+from src.localization.ampl_solver import AMPLSolver
 from src.experiments.context import RunContext
 
 
@@ -12,6 +13,7 @@ class SolverRegistry:
         self.scipy_solver = SciPyLocalizationSolver()
         self.ipopt_solver = IPOPTSolver()
         self.pf_solver = ParticleFilterSolver(x_bounds=x_range, y_bounds=y_range)
+        self.ampl_solver = AMPLSolver(solver_name="bonmin")
 
         # THE STRATEGY DICTIONARY
         self.strategies = {
@@ -19,7 +21,8 @@ class SolverRegistry:
             "weighted": self._run_weighted,
             "ipopt": self._run_ipopt,
             "weighted_ipopt": self._run_weighted_ipopt,
-            "particle_filter": self._run_pf
+            "particle_filter": self._run_pf,
+            "ampl_bonmin": self._run_ampl_bonmin
         }
 
     def execute_solver(self, solver_name: str, context: RunContext):
@@ -103,3 +106,6 @@ class SolverRegistry:
 
     def _run_pf(self, ctx: RunContext):
         return self.pf_solver.solve(ctx.anchors, ctx.distances, x0=ctx.baseline_guess)
+
+    def _run_ampl_bonmin(self, ctx: RunContext):
+        return self.ampl_solver.solve(ctx)

@@ -46,7 +46,9 @@ def render_sidebar() -> tuple[ExperimentConfig, int, int, bool]:
 
     st.sidebar.markdown("---")
     st.sidebar.subheader("Algorithms")
-    available_solvers = ["vanilla", "weighted", "ipopt", "weighted_ipopt", "particle_filter"]
+    available_solvers = [
+        "vanilla", "weighted", "ipopt", "weighted_ipopt", "particle_filter", "ampl_bonmin" # NEW
+    ]
     selected_solvers = st.sidebar.multiselect(
         "Select solvers to evaluate:", options=available_solvers, default=available_solvers
     )
