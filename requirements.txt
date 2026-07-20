@@ -1,7 +1,20 @@
 numpy
 pandas
 scipy
+pyproj
 folium
 streamlit
-cyipopt-wheels
 plotly
+matplotlib
+
+# IPOPT bindings. cyipopt provides the `cyipopt` module used by
+# src/localization/ipopt_solver.py. On Windows the prebuilt wheels package is
+# usually the easiest install; on conda use `conda install -c conda-forge cyipopt`.
+cyipopt
+
+# Optional: only needed for the ampl_ipopt / ampl_bonmin / ampl_scip solvers.
+# After installing, register the open-source solvers (no license required) with:
+#   python -m amplpy.modules install coin      # provides ipopt, bonmin
+# ampl_scip needs a separately-licensed AMPL SCIP module and is NOT available
+# in the free `coin` bundle.
+amplpy

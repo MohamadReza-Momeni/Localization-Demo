@@ -1,6 +1,8 @@
+import time
 import numpy as np
 from src.localization.scipy_solver import SciPyLocalizationSolver
 from src.localization.ipopt_solver import IPOPTSolver
+from src.localization.ampl_solver import AMPLSolver
 from src.localization.particle_filter_solver import ParticleFilterSolver
 from src.experiments.context import RunContext
 
@@ -11,22 +13,47 @@ class SolverRegistry:
     def __init__(self, x_range, y_range):
         self.scipy_solver = SciPyLocalizationSolver()
         self.ipopt_solver = IPOPTSolver()
+        self.ampl_solver = AMPLSolver()
         self.pf_solver = ParticleFilterSolver(x_bounds=x_range, y_bounds=y_range)
 
         # THE STRATEGY DICTIONARY
+        # NOTE: "ampl_cbc"/"ampl_cuopt" are intentionally NOT registered here —
+        # both are LP/MIP-oriented solvers that cannot represent this problem's
+        # nonlinear RSSI objective. See ampl_solver.py's SOLVER_CAPABILITIES.
+        # They remain callable directly via AMPLSolver().solve(solver_name=...)
+        # for anyone who wants to see the explicit error, e.g. in a demo script.
+        #
+        # "ampl_ipopt" (in addition to the native cyipopt-backed "ipopt") lets a
+        # D)-style comparison isolate the SOLVER from the INTERFACE: "ipopt" vs
+        # "ampl_ipopt" should converge to essentially the same objective given the
+        # same starts (same underlying algorithm, different binding), whereas
+        # "ipopt" vs "ampl_bonmin"/"ampl_scip" isolates genuine solver differences.
         self.strategies = {
             "vanilla": self._run_vanilla,
             "weighted": self._run_weighted,
             "ipopt": self._run_ipopt,
             "weighted_ipopt": self._run_weighted_ipopt,
-            "particle_filter": self._run_pf
+            "ampl_ipopt": self._run_ampl_ipopt,
+            "ampl_bonmin": self._run_ampl_bonmin,
+            "ampl_scip": self._run_ampl_scip,
+            "particle_filter": self._run_pf,
         }
 
     def execute_solver(self, solver_name: str, context: RunContext):
         if solver_name not in self.strategies:
             raise ValueError(f"Unknown solver: {solver_name}")
-        # Execute the specific strategy dynamically!
-        return self.strategies[solver_name](context)
+
+        # Wall-clock timing around the actual solve — deliberately measured here
+        # (one place, uniformly, for every strategy) rather than inside each
+        # solver, so every solver is timed the same way regardless of whether its
+        # own .solve() internally does multi-start, AMPL round-trips, etc.
+        # This is what feeds the "accuracy vs cost" side of the D) solver
+        # comparison (see solver_comparison_report.py) — RMSE alone doesn't tell
+        # you that SCIP's global search costs 50x what IPOPT's local search does.
+        start = time.perf_counter()
+        result = self.strategies[solver_name](context)
+        result["solve_time_sec"] = time.perf_counter() - start
+        return result
 
     # --- INDIVIDUAL STRATEGIES ---
 
@@ -55,18 +82,6 @@ class SolverRegistry:
         # (recovered from distances/p0/ple, the same inversion RSSIDomainProblem does
         # internally), not from distance to an uncertain baseline guess. This keeps the
         # weighting consistent with the domain the objective actually lives in.
-        #
-        # Physical justification: anchors reporting a stronger (less negative) RSSI are
-        # generally further from the receiver's noise floor and thus more reliable —
-        # this is a real hardware effect, independent of geometric distance to any
-        # particular candidate position.
-        #
-        # CAVEAT: this simulator's RSSIModel currently applies the SAME noise_std to every
-        # anchor regardless of signal strength or distance (see rssi.py). So even with a
-        # theoretically-correct RSSI-domain weight, there is currently no real per-anchor
-        # reliability difference in the data for this weighting to exploit — expect
-        # weighted_ipopt to converge close to plain ipopt's behavior unless the noise
-        # model is made heterogeneous (e.g. via distance_noise_growth).
         distances = np.asarray(distances, dtype=float)
         rssi_meas = p0 - 10.0 * ple * np.log10(distances + 1e-9)
 
@@ -87,7 +102,8 @@ class SolverRegistry:
     def _run_ipopt(self, ctx: RunContext):
         sol = self.ipopt_solver.solve(
             ctx.anchors, ctx.distances, ref_power=ctx.p0, ple=ctx.ple,
-            x0=ctx.baseline_guess, x_range=ctx.x_range, y_range=ctx.y_range
+            x0=ctx.baseline_guess, x_range=ctx.x_range, y_range=ctx.y_range,
+            hyperparams=ctx.ipopt_params,
         )
         sol["success"] = sol["info"].get("status", -1) in [0, 1]
         return sol
@@ -96,9 +112,39 @@ class SolverRegistry:
         weights = self._compute_rssi_weights(ctx.distances, ctx.p0, ctx.ple)
         sol = self.ipopt_solver.solve(
             ctx.anchors, ctx.distances, ref_power=ctx.p0, ple=ctx.ple,
-            weights=weights, x0=ctx.baseline_guess, x_range=ctx.x_range, y_range=ctx.y_range
+            weights=weights, x0=ctx.baseline_guess, x_range=ctx.x_range, y_range=ctx.y_range,
+            hyperparams=ctx.ipopt_params,
         )
         sol["success"] = sol["info"].get("status", -1) in [0, 1]
+        return sol
+
+    def _run_ampl_ipopt(self, ctx: RunContext):
+        # Same RSSI-domain NLP, same starting-point strategy, routed through AMPL
+        # instead of cyipopt directly. Comparing this against "ipopt" isolates
+        # interface/binding effects (AMPL's presolve, scaling, NL-file round trip)
+        # from genuine algorithmic differences — the latter is what "ipopt" vs
+        # "ampl_bonmin"/"ampl_scip" actually measures.
+        sol = self.ampl_solver.solve(
+            ctx.anchors, ctx.distances, ref_power=ctx.p0, ple=ctx.ple,
+            x0=ctx.baseline_guess, x_range=ctx.x_range, y_range=ctx.y_range,
+            solver_name="ipopt", solver_options=ctx.ampl_options.get("ipopt", ""),
+        )
+        return sol
+
+    def _run_ampl_bonmin(self, ctx: RunContext):
+        sol = self.ampl_solver.solve(
+            ctx.anchors, ctx.distances, ref_power=ctx.p0, ple=ctx.ple,
+            x0=ctx.baseline_guess, x_range=ctx.x_range, y_range=ctx.y_range,
+            solver_name="bonmin", solver_options=ctx.ampl_options.get("bonmin", ""),
+        )
+        return sol
+
+    def _run_ampl_scip(self, ctx: RunContext):
+        sol = self.ampl_solver.solve(
+            ctx.anchors, ctx.distances, ref_power=ctx.p0, ple=ctx.ple,
+            x0=ctx.baseline_guess, x_range=ctx.x_range, y_range=ctx.y_range,
+            solver_name="scip", solver_options=ctx.ampl_options.get("scip", ""),
+        )
         return sol
 
     def _run_pf(self, ctx: RunContext):
