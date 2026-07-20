@@ -1,7 +1,18 @@
-numpy
-pandas
-scipy
-folium
-streamlit
-cyipopt-wheels
-plotly
+# Web Framework & UI
+streamlit>=1.24.0
+
+# Data Science & Math Core
+numpy>=1.24.0
+pandas>=2.0.0
+scipy>=1.10.0
+
+# Visualization
+plotly>=5.14.0
+folium>=0.14.0
+streamlit-folium>=0.13.0
+
+# Solvers & Optimization
+cyipopt>=1.3.0    # Python wrapper for IPOPT
+amplpy>=0.12.0    # AMPL Python API for Bonmin/COIN-OR
+
+# python -m amplpy.modules install coin
