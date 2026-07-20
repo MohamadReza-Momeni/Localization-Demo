@@ -1,17 +1,7 @@
-streamlit
-
-# Data Science & Math Core
 numpy
 pandas
 scipy
-
-# Visualization
-plotly
 folium
-streamlit-folium
-
-# Solvers & Optimization
-cyipopt-wheels    # Python wrapper for IPOPT
-amplpy    # AMPL Python API for Bonmin/COIN-OR
-
-# python -m amplpy.modules install coin
+streamlit
+cyipopt-wheels
+plotly
